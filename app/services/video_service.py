@@ -6,9 +6,7 @@ from pathlib import Path
 import re
 
 def extract_audio(video_path, audio_path):
-    """
-    Extrage audio dintr-un fișier video folosind ffmpeg.
-    """
+
     video_path_str = os.path.normpath(video_path)
     audio_path_str = os.path.normpath(audio_path)
     command = f"ffmpeg -i \"{video_path_str}\" -ac 1 -ar 16000 -vn \"{audio_path_str}\" -y"
@@ -24,9 +22,7 @@ def get_video_duration(video_path):
 
 
 def overlay_audio_on_video(video_path, audio_path, output_path):
-    """
-    Suprapune audio peste un fișier video folosind ffmpeg.
-    """
+
     video_path = Path(video_path)
     audio_path = Path(audio_path)
     output_path = Path(output_path)
@@ -58,9 +54,7 @@ def overlay_audio_on_video(video_path, audio_path, output_path):
         raise RuntimeError(f"Eroare la suprapunerea audio pe video: {str(e)}")
 
 def find_video_file(directory):
-    """
-    Găsește primul fișier video (cu extensia .mp4 sau .mkv) într-un director.
-    """
+
     directory = Path(directory)
     for file in directory.iterdir():
         if file.is_file() and file.suffix.lower() in (".mp4", ".mkv"):

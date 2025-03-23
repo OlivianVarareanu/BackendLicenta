@@ -12,17 +12,6 @@ from pydub.silence import detect_nonsilent
 
 def transcribe_audio(audio_path, model_size="large-v2"):
     
-    """
-    Transcriere audio folosind librarie Whisper
-    
-    Args:
-        audio_path (str): Calea catre fisierul audio.
-        model_size (str): Modelul (default: "large-v2").
-    
-    Returns:
-        list: O lista de segmente.
-    """
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = whisper.load_model(model_size, device=device)
     result = model.transcribe(audio_path)

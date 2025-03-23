@@ -6,5 +6,5 @@ def translate_text(text, target_lang):
     print(result.text)
 
     if result.text is None:
-        raise ValueError(f"Nu s-a obținut niciun rezultat pentru traducerea textului: {text}")
+        raise ValueError(f"Textul '{text}' nu se poate traduce.")
     return result.text
