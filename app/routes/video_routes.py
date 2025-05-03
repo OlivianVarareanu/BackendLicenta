@@ -56,7 +56,8 @@ async def upload_video(video: UploadFile = File(...)):
 
 @router.post("/transcribe")
 async def transcribe_video(
-    token: str = Form(...)
+    token: str = Form(...),
+    original_lang: str = Form(...)
 ):
     try:
         # Decodificare token
@@ -90,7 +91,7 @@ async def transcribe_video(
         extract_audio(video_path, audio_path)
         
         # Generare transcriptie
-        original_segments = transcribe_audio(audio_path)
+        original_segments = transcribe_audio(audio_path,original_lang)
         
         # Procesare segmente: combinare dupa punctuatie
         merged_segments = []
@@ -140,7 +141,8 @@ async def transcribe_video(
 @router.post("/translate")
 async def translate_transcription(
     token: str = Form(...),
-    target_lang: str = Form(...)
+    target_lang: str = Form(...),
+    original_lang: str = Form(...)
 ):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -168,7 +170,7 @@ async def translate_transcription(
         
         translated_segments = []
         for segment in segments:
-            translated_text = translate_text(segment["text"], target_lang)
+            translated_text = translate_text(segment["text"], target_lang,original_lang)
             translated_segments.append({"start": segment["start"], "end": segment["end"], "text": translated_text})
         
         with open(translated_transcription_path, "w", encoding="utf-8") as f:

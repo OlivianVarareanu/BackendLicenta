@@ -8,10 +8,10 @@ import subprocess
 import torch
 from pydub.silence import detect_nonsilent
 
-def transcribe_audio(audio_path, model_size="large-v2"):
+def transcribe_audio(audio_path, original_lang, model_size="large-v2"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = whisper.load_model(model_size, device=device)
-    result = model.transcribe(audio_path,word_timestamps=True,temperature=0.0,beam_size=5,best_of=3,condition_on_previous_text=True)
+    result = model.transcribe(audio_path,language=original_lang,word_timestamps=True,temperature=0.0,beam_size=5,best_of=3,condition_on_previous_text=True)
     return result["segments"]
 
 async def generate_audio_segment(text, file_path, voice_name, rate="+0%"):
@@ -40,13 +40,10 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
         start_time = segment["start"] - first_segment_start_time
         end_time = segment["end"] - first_segment_start_time
         text = segment["text"]
-        translated_text = translate_text(text, target_lang)
-        print(f"[TRANSLATED {i}] {translated_text} ({start_time}s - {end_time}s)")
-        
         translated_segments.append({
             "start": start_time,
             "end": end_time,
-            "text": translated_text,
+            "text": text,
             "index": i
         })
 
