@@ -3,30 +3,18 @@ from app.services.video_service import get_video_duration
 from app.services.translation_service import translate_text
 import os
 import edge_tts
-import asyncio
 import whisper
+import subprocess
 import torch
 from pydub.silence import detect_nonsilent
 
 def transcribe_audio(audio_path, model_size="large-v2"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = whisper.load_model(model_size, device=device)
-    result = model.transcribe(audio_path)
+    result = model.transcribe(audio_path,word_timestamps=True,temperature=0.0,beam_size=5,best_of=3,condition_on_previous_text=True)
     return result["segments"]
 
-def calculate_initial_silence(audio_path, silence_threshold=-50, min_silence_len=500):
-    audio = AudioSegment.from_file(audio_path)
-    nonsilent_ranges = detect_nonsilent(audio, silence_thresh=silence_threshold, min_silence_len=min_silence_len)
-    
-    if not nonsilent_ranges:
-        return 0
-
-    first_nonsilent_start = nonsilent_ranges[0][0]
-    initial_silence = first_nonsilent_start / 1000
-    
-    return initial_silence
-
-async def generate_audio_segment(text, file_path, voice_name="de-DE-SeraphinaMultilingualNeural", rate="+0%"):
+async def generate_audio_segment(text, file_path, voice_name, rate="+0%"):
     print(f"[DEBUG] Generare segment audio pentru textul: {text}")
     try:
         tts = edge_tts.Communicate(text, voice_name, rate=rate)
@@ -43,7 +31,6 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
 
     video_duration = get_video_duration(video_path)
     first_segment_start_time = segments[0]["start"]
-    print(f"[INFO] Decalajul de timp până la primul sunet: {first_segment_start_time:.2f} secunde.")
 
     segments_dir = f"user_files/{user_name}/segments"
     os.makedirs(segments_dir, exist_ok=True)
@@ -71,8 +58,6 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
         combined_audio += AudioSegment.silent(duration=silence_at_start)
     
     for i, segment in enumerate(translated_segments):
-        segment_duration = (segment["end"] - segment["start"]) * 1000
-        
         if i < len(translated_segments) - 1:
             next_start = translated_segments[i+1]["start"]
             available_duration = (next_start - segment["start"]) * 1000
@@ -85,8 +70,8 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
         
         while attempt < max_attempts:
             segment_audio_path = os.path.join(segments_dir, f"segment_{segment['index']}_{attempt}.mp3")
-            await generate_audio_segment(segment["text"], segment_audio_path, "de-DE-FlorianMultilingualNeural", rate=rate)
-            
+            await generate_audio_segment(segment["text"], segment_audio_path, "de-DE-SeraphinaMultilingualNeural", rate=rate)  #ro-RO-EmilNeural , en-CA-ClaraNeural, ro-RO-AlinaNeural, de-DE-SeraphinaMultilingualNeural
+           
             segment_audio = AudioSegment.from_mp3(segment_audio_path)
             actual_duration = segment_audio.duration_seconds * 1000
             
@@ -101,16 +86,16 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
 
                 slow_percent = min(slow_percent, 20)
                 rate = f"-{slow_percent}%"
-                print(f"[INFO] Segment {segment['index']} prea scurt. Încetinire cu rata: {rate}")
+                print(f"[INFO] Segment {segment['index']} prea scurt. Incetinire cu procentajul: {rate}")
             else:
 
                 speed_factor = duration_ratio
                 speed_percent = int((speed_factor - 1) * 100) + 15
-                rate = f"+{min(speed_percent, 80)}%"
+                rate = f"+{min(speed_percent, 85)}%"
                 print(f"[INFO] Segment {segment['index']} prea lung. Accelerare cu rata: {rate}")
             
             print(f"[INFO] Ajustare segment {segment['index']}: durata actuală={actual_duration/1000:.2f}s, " 
-                  f"disponibil={available_duration/1000:.2f}s, noua rată={rate}")
+                  f"disponibil={available_duration/1000:.2f}s, noua viteza={rate}")
             
             attempt += 1
         
@@ -144,3 +129,73 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
     print(f"[INFO] Fișier audio final generat: {final_audio_path}")
     
     return final_audio_path
+
+def overlay_audio_with_reduced_original(original_video_path, generated_audio_path, final_video_path, original_volume_reduction=-20):
+    """
+    Overlay generated audio on original video while reducing original audio volume
+    
+    :param original_video_path: Path to the original video file
+    :param generated_audio_path: Path to the newly generated audio file
+    :param final_video_path: Path where the final video will be saved
+    :param original_volume_reduction: Decibel reduction for original audio (negative value)
+    """
+
+    original_audio_path = os.path.join(os.path.dirname(original_video_path), "original_audio.wav")
+    
+    extract_audio_command = [
+        "ffmpeg", 
+        "-i", original_video_path, 
+        "-vn",  
+        "-acodec", "pcm_s16le", 
+        "-ar", "44100",  
+        "-ac", "2",  
+        original_audio_path
+    ]
+    
+    try:
+        subprocess.run(extract_audio_command, check=True)
+        
+        original_audio = AudioSegment.from_wav(original_audio_path)
+        generated_audio = AudioSegment.from_wav(generated_audio_path)
+        
+        reduced_original_audio = original_audio + original_volume_reduction
+        
+        max_length = max(len(reduced_original_audio), len(generated_audio))
+        reduced_original_audio = reduced_original_audio.append(
+            AudioSegment.silent(duration=max_length - len(reduced_original_audio)), 
+            crossfade=0
+        )
+        generated_audio = generated_audio.append(
+            AudioSegment.silent(duration=max_length - len(generated_audio)), 
+            crossfade=0
+        )
+        
+        mixed_audio = reduced_original_audio.overlay(generated_audio)
+        
+        temp_audio_path = os.path.join(os.path.dirname(final_video_path), "mixed_audio.wav")
+        mixed_audio.export(temp_audio_path, format="wav")
+        
+        ffmpeg_command = [
+            "ffmpeg", 
+            "-i", original_video_path,
+            "-i", temp_audio_path,
+            "-c:v", "copy", 
+            "-c:a", "aac", 
+            "-map", "0:v:0", 
+            "-map", "1:a:0", 
+            "-shortest", 
+            final_video_path
+        ]
+        
+        subprocess.run(ffmpeg_command, check=True)
+        
+        # Clean up temporary files
+        os.remove(original_audio_path)
+        os.remove(temp_audio_path)
+        
+    except subprocess.CalledProcessError as e:
+        print(f"[ERROR] FFmpeg command failed: {e}")
+        raise
+    except Exception as e:
+        print(f"[ERROR] Audio mixing failed: {e}")
+        raise

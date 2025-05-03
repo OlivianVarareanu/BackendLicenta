@@ -1,7 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.services.audio_service import transcribe_audio, generate_audio_segments
-from app.services.video_service import extract_audio, overlay_audio_on_video, find_video_file
+from app.services.video_service import extract_audio, overlay_audio_with_reduced_original, find_video_file
 from app.services.translation_service import translate_text
 from pathlib import Path
 import os
@@ -59,7 +59,7 @@ async def transcribe_video(
     token: str = Form(...)
 ):
     try:
-        # Decodfificare token
+        # Decodificare token
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         upload_id = payload.get("sub")
         
@@ -90,12 +90,44 @@ async def transcribe_video(
         extract_audio(video_path, audio_path)
         
         # Generare transcriptie
-        segments = transcribe_audio(audio_path)
+        original_segments = transcribe_audio(audio_path)
         
+        # Procesare segmente: combinare dupa punctuatie
+        merged_segments = []
+        buffer_text = ""
+        start_time = None
+        sentence_count = 0  # Contor pentru propozitii combinate
+
+        for seg in original_segments:
+            if start_time is None:
+                start_time = seg['start']
+
+            buffer_text += " " + seg['text'].strip()
+            sentence_count += 1
+
+            if any(buffer_text.strip().endswith(punct) for punct in [".", "?", "!"]) or sentence_count >= 3:
+                merged_segments.append({
+                    "start": start_time,
+                    "end": seg['end'],
+                    "text": buffer_text.strip()
+                })
+                # Resetăm buffer-ul și contorul
+                buffer_text = ""
+                start_time = None
+                sentence_count = 0
+
+        # Dacă mai rămâne ceva în buffer (fără punct final)
+        if buffer_text:
+            merged_segments.append({
+                "start": start_time if start_time is not None else 0.0,
+                "end": original_segments[-1]['end'],
+                "text": buffer_text.strip()
+            })
+
         # Salvare transcriptie
         transcription_path = os.path.join(transcriptions_dir, "original_transcription.json")
         with open(transcription_path, "w", encoding="utf-8") as f:
-            json.dump(segments, f, ensure_ascii=False, indent=4)
+            json.dump(merged_segments, f, ensure_ascii=False, indent=4)
 
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expirat")
@@ -103,6 +135,7 @@ async def transcribe_video(
         raise HTTPException(status_code=401, detail="Token invalid")
     
     return {"message": "Transcriptie generata cu succes.", "transcription_path": transcription_path}
+
 
 @router.post("/translate")
 async def translate_transcription(
@@ -186,9 +219,13 @@ async def generate_video(
 
         await generate_audio_segments(translated_segments, video_path, target_lang, upload_id)
 
-        # Combinare segmente audio si suprapunere cu video
+        # Combinare segmente audio si suprapunere cu video folosind noua functie
         try:
-            overlay_audio_on_video(video_path, generated_audio, final_video_path)
+            overlay_audio_with_reduced_original(
+                str(video_path), 
+                str(generated_audio), 
+                str(final_video_path)
+            )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Eroare la suprapunerea audio pe video: {str(e)}")
         
@@ -201,53 +238,3 @@ async def generate_video(
         "message": "Videoclipul a fost generat cu succes.",
         "final_video_path": str(final_video_path)
     }
-
-@router.post("/generate")
-async def generate_video(
-    token: str = Form(...),
-    target_lang: str = Form(...),
-):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        upload_id = payload.get("sub")
-        
-        if upload_id is None:
-            raise HTTPException(status_code=401, detail="Token invalid")
-
-        user_dir = Path(f"user_files/{upload_id}")
-        original_dir = user_dir / "original"
-        translated_transcription_path = user_dir / "transcriptions" / "translated_transcription.json"
-        segments_dir = user_dir / "segments"
-        segments_dir.mkdir(parents=True, exist_ok=True)
-        final_video_path = user_dir / "final_video.mp4"
-        generated_audio = segments_dir / "audio.wav"
-
-        if not original_dir.exists():
-            raise HTTPException(status_code=404, detail="Directorul original nu exista pentru acest utilizator.")
-
-        video_path = find_video_file(original_dir)
-        if not video_path:
-            raise HTTPException(status_code=404, detail="Videoclipul original a fost sters.")
-
-        if not translated_transcription_path.exists():
-            raise HTTPException(status_code=404, detail="Transcriptia tradusa nu exista.")
-
-        with open(translated_transcription_path, "r", encoding="utf-8") as f:
-            translated_segments = json.load(f)
-
-        await generate_audio_segments(translated_segments, video_path, target_lang, upload_id)
-
-        try:
-            overlay_audio_on_video(video_path, generated_audio, final_video_path)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Eroare la suprapunerea audio pe video: {str(e)}")
-        
-        return {
-            "message": "Videoclipul a fost generat cu succes.",
-            "final_video_path": str(final_video_path)
-        }
-        
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expirat")
-    except jwt.JWTError:
-        raise HTTPException(status_code=401, detail="Token invalid")
