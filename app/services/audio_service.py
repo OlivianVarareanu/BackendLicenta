@@ -1,6 +1,5 @@
 from pydub import AudioSegment
 from app.services.video_service import get_video_duration
-from app.services.translation_service import translate_text
 import os
 import edge_tts
 import whisper
@@ -11,8 +10,14 @@ from pydub.silence import detect_nonsilent
 def transcribe_audio(audio_path, original_lang, model_size="large-v2"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = whisper.load_model(model_size, device=device)
-    result = model.transcribe(audio_path,language=original_lang,word_timestamps=True,temperature=0.0,beam_size=5,best_of=3,condition_on_previous_text=True)
-    return result["segments"]
+    
+    if(original_lang):
+        result = model.transcribe(audio_path,language=original_lang,word_timestamps=True,temperature=0.0,beam_size=5,best_of=3,condition_on_previous_text=True)
+    else:
+        result = model.transcribe(audio_path,word_timestamps=True,temperature=0.0,beam_size=5,best_of=3,condition_on_previous_text=True)
+
+    detected_language = result['language']
+    return result["segments"], detected_language
 
 async def generate_audio_segment(text, file_path, voice_name, rate="+0%"):
     print(f"[DEBUG] Generare segment audio pentru textul: {text}")
@@ -47,7 +52,7 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
             "index": i
         })
 
-    max_attempts = 3
+    max_attempts = 4
     combined_audio = AudioSegment.silent(duration=0)
     
     silence_at_start = first_segment_start_time * 1000
@@ -74,21 +79,21 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
             
             duration_ratio = actual_duration / available_duration
             
-            if 0.85 <= duration_ratio <= 1.1:
+            if 0.87 <= duration_ratio <= 1.1:
                 segment_file = segment_audio_path
                 break
-            elif duration_ratio < 0.85:
+            elif duration_ratio < 0.87:
 
                 slow_percent = int((1 / duration_ratio - 1) * 100)
 
-                slow_percent = min(slow_percent, 20)
+                slow_percent = min(slow_percent, 15)
                 rate = f"-{slow_percent}%"
                 print(f"[INFO] Segment {segment['index']} prea scurt. Incetinire cu procentajul: {rate}")
             else:
 
                 speed_factor = duration_ratio
                 speed_percent = int((speed_factor - 1) * 100) + 15
-                rate = f"+{min(speed_percent, 85)}%"
+                rate = f"+{min(speed_percent, 95)}%"
                 print(f"[INFO] Segment {segment['index']} prea lung. Accelerare cu rata: {rate}")
             
             print(f"[INFO] Ajustare segment {segment['index']}: durata actuală={actual_duration/1000:.2f}s, " 
@@ -127,7 +132,7 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
     
     return final_audio_path
 
-def overlay_audio_with_reduced_original(original_video_path, generated_audio_path, final_video_path, original_volume_reduction=-20):
+def overlay_audio_with_reduced_original(original_video_path, generated_audio_path, final_video_path, original_volume_reduction=-14):
     """
     Overlay generated audio on original video while reducing original audio volume
     

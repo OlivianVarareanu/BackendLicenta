@@ -57,7 +57,7 @@ async def upload_video(video: UploadFile = File(...)):
 @router.post("/transcribe")
 async def transcribe_video(
     token: str = Form(...),
-    original_lang: str = Form(...)
+    original_lang: str | None = Form(None)
 ):
     try:
         # Decodificare token
@@ -91,7 +91,7 @@ async def transcribe_video(
         extract_audio(video_path, audio_path)
         
         # Generare transcriptie
-        original_segments = transcribe_audio(audio_path,original_lang)
+        original_segments, detected_language = transcribe_audio(audio_path, original_lang)
         
         # Procesare segmente: combinare dupa punctuatie
         merged_segments = []
@@ -135,7 +135,7 @@ async def transcribe_video(
     except jwt.JWTError:
         raise HTTPException(status_code=401, detail="Token invalid")
     
-    return {"message": "Transcriptie generata cu succes.", "transcription_path": transcription_path}
+    return {"message": "Transcriptie generata cu succes.", "transcription_path": transcription_path, "detected_language": detected_language}
 
 
 @router.post("/translate")
