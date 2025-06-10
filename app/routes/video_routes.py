@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer
 from app.services.audio_service import transcribe_audio, generate_audio_segments
 from app.services.video_service import extract_audio, overlay_audio_with_reduced_original, find_video_file
 from app.services.translation_service import translate_text
@@ -93,42 +93,10 @@ async def transcribe_video(
         # Generare transcriptie
         original_segments, detected_language = transcribe_audio(audio_path, original_lang)
         
-        # Procesare segmente: combinare dupa punctuatie
-        merged_segments = []
-        buffer_text = ""
-        start_time = None
-        sentence_count = 0  # Contor pentru propozitii combinate
-
-        for seg in original_segments:
-            if start_time is None:
-                start_time = seg['start']
-
-            buffer_text += " " + seg['text'].strip()
-            sentence_count += 1
-
-            if any(buffer_text.strip().endswith(punct) for punct in [".", "?", "!"]) or sentence_count >= 3:
-                merged_segments.append({
-                    "start": start_time,
-                    "end": seg['end'],
-                    "text": buffer_text.strip()
-                })
-                # Resetăm buffer-ul și contorul
-                buffer_text = ""
-                start_time = None
-                sentence_count = 0
-
-        # Dacă mai rămâne ceva în buffer (fără punct final)
-        if buffer_text:
-            merged_segments.append({
-                "start": start_time if start_time is not None else 0.0,
-                "end": original_segments[-1]['end'],
-                "text": buffer_text.strip()
-            })
-
-        # Salvare transcriptie
+        # Salvare transcriptie așa cum este generată, fără combinare
         transcription_path = os.path.join(transcriptions_dir, "original_transcription.json")
         with open(transcription_path, "w", encoding="utf-8") as f:
-            json.dump(merged_segments, f, ensure_ascii=False, indent=4)
+            json.dump(original_segments, f, ensure_ascii=False, indent=4)
 
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expirat")

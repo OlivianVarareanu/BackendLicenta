@@ -5,16 +5,34 @@ import edge_tts
 import whisper
 import subprocess
 import torch
-from pydub.silence import detect_nonsilent
 
-def transcribe_audio(audio_path, original_lang, model_size="large-v2"):
+
+def transcribe_audio(audio_path, original_lang, model_size="medium"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = whisper.load_model(model_size, device=device)
-    
     if(original_lang):
-        result = model.transcribe(audio_path,language=original_lang,word_timestamps=True,temperature=0.0,beam_size=5,best_of=3,condition_on_previous_text=True)
+        result = model.transcribe(
+            audio_path,
+            language=original_lang,
+            word_timestamps=True,
+            temperature=0.0,
+            beam_size=5,
+            condition_on_previous_text=False,
+            compression_ratio_threshold=1.5,
+            logprob_threshold=-1.0,
+            no_speech_threshold=0.4
+        )
     else:
-        result = model.transcribe(audio_path,word_timestamps=True,temperature=0.0,beam_size=5,best_of=3,condition_on_previous_text=True)
+        result = model.transcribe(
+            audio_path,
+            word_timestamps=True,
+            temperature=0.0,
+            beam_size=5,
+            condition_on_previous_text=False,
+            compression_ratio_threshold=1.5,
+            logprob_threshold=-1.0,
+            no_speech_threshold=0.4
+        )
 
     detected_language = result['language']
     return result["segments"], detected_language
@@ -42,8 +60,8 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
 
     translated_segments = []
     for i, segment in enumerate(segments):
-        start_time = segment["start"] - first_segment_start_time
-        end_time = segment["end"] - first_segment_start_time
+        start_time = segment["start"]
+        end_time = segment["end"]
         text = segment["text"]
         translated_segments.append({
             "start": start_time,
@@ -52,85 +70,64 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
             "index": i
         })
 
-    max_attempts = 4
     combined_audio = AudioSegment.silent(duration=0)
-    
+
     silence_at_start = first_segment_start_time * 1000
     if silence_at_start > 0:
         combined_audio += AudioSegment.silent(duration=silence_at_start)
-    
+
+    current_time_position = silence_at_start
+
     for i, segment in enumerate(translated_segments):
+        segment_start_ms = segment["start"] * 1000
+
+        if segment_start_ms > current_time_position:
+            silence_needed = segment_start_ms - current_time_position
+            combined_audio += AudioSegment.silent(duration=silence_needed)
+            current_time_position = segment_start_ms
+
         if i < len(translated_segments) - 1:
-            next_start = translated_segments[i+1]["start"]
+            next_start = translated_segments[i + 1]["start"]
             available_duration = (next_start - segment["start"]) * 1000
         else:
             available_duration = (video_duration - segment["start"]) * 1000
-            
-        rate = "+0%"
-        attempt = 0
-        segment_file = None
-        
-        while attempt < max_attempts:
-            segment_audio_path = os.path.join(segments_dir, f"segment_{segment['index']}_{attempt}.mp3")
-            await generate_audio_segment(segment["text"], segment_audio_path, "de-DE-SeraphinaMultilingualNeural", rate=rate)  #ro-RO-EmilNeural , en-CA-ClaraNeural, ro-RO-AlinaNeural, de-DE-SeraphinaMultilingualNeural
-           
+
+        segment_audio_path = os.path.join(segments_dir, f"segment_{segment['index']}_base.mp3")
+        await generate_audio_segment(segment["text"], segment_audio_path, "de-DE-SeraphinaMultilingualNeural", rate="+0%") #ro-RO-EmilNeural , ro-RO-AlinaNeural, en-US-RogerNeural , de-DE-SeraphinaMultilingualNeural
+        segment_audio = AudioSegment.from_mp3(segment_audio_path)
+        actual_duration = segment_audio.duration_seconds * 1000
+
+        duration_ratio = actual_duration / available_duration
+
+        if duration_ratio > 1.01:
+            adjustment_percent = round((duration_ratio - 1) * 100)
+            rate = f"+{min(adjustment_percent, 99)}%"
+            print(f"[INFO] Segment {segment['index']} prea lung: {actual_duration:.0f}ms > {available_duration:.0f}ms → {rate}")
+
+            segment_audio_path = os.path.join(segments_dir, f"segment_{segment['index']}_adjusted.mp3")
+            await generate_audio_segment(segment["text"], segment_audio_path, "de-DE-SeraphinaMultilingualNeural", rate=rate)
             segment_audio = AudioSegment.from_mp3(segment_audio_path)
-            actual_duration = segment_audio.duration_seconds * 1000
-            
-            duration_ratio = actual_duration / available_duration
-            
-            if 0.87 <= duration_ratio <= 1.1:
-                segment_file = segment_audio_path
-                break
-            elif duration_ratio < 0.87:
-
-                slow_percent = int((1 / duration_ratio - 1) * 100)
-
-                slow_percent = min(slow_percent, 15)
-                rate = f"-{slow_percent}%"
-                print(f"[INFO] Segment {segment['index']} prea scurt. Incetinire cu procentajul: {rate}")
-            else:
-
-                speed_factor = duration_ratio
-                speed_percent = int((speed_factor - 1) * 100) + 15
-                rate = f"+{min(speed_percent, 95)}%"
-                print(f"[INFO] Segment {segment['index']} prea lung. Accelerare cu rata: {rate}")
-            
-            print(f"[INFO] Ajustare segment {segment['index']}: durata actuală={actual_duration/1000:.2f}s, " 
-                  f"disponibil={available_duration/1000:.2f}s, noua viteza={rate}")
-            
-            attempt += 1
-        
-        if segment_file:
-            segment_audio = AudioSegment.from_mp3(segment_file)
-            combined_audio += segment_audio
-            
-            if i < len(translated_segments) - 1:
-                next_start_time = translated_segments[i+1]["start"] * 1000
-                current_position = (segment["start"] * 1000) + segment_audio.duration_seconds * 1000
-                silence_needed = next_start_time - current_position
-                
-                if silence_needed > 0:
-                    combined_audio += AudioSegment.silent(duration=silence_needed)
-                elif silence_needed < -100:  
-                    print(f"[WARNING] Segment {segment['index']} depășește timpul disponibil cu {-silence_needed/1000:.2f}s")
         else:
-            print(f"[WARNING] Nu s-a putut genera un segment potrivit pentru {segment['index']} după {max_attempts} încercări")
-            last_attempt_path = os.path.join(segments_dir, f"segment_{segment['index']}_{max_attempts-1}.mp3")
-            if os.path.exists(last_attempt_path):
-                segment_audio = AudioSegment.from_mp3(last_attempt_path)
-                combined_audio += segment_audio
-                print(f"[INFO] S-a folosit ultima variantă disponibilă pentru segmentul {segment['index']}")
-    
-    silence_at_end = (video_duration - translated_segments[-1]["end"]) * 1000
-    if silence_at_end > 0:
+            print(f"[INFO] Segment {segment['index']} OK  {actual_duration:.0f}ms ≤ {available_duration:.0f}ms.")
+
+        combined_audio += segment_audio
+        start_debug = current_time_position
+        end_debug = start_debug + segment_audio.duration_seconds * 1000
+        print(f"[DEBUG] Segment {segment['index']} → start={start_debug:.0f}ms, end={end_debug:.0f}ms")
+        current_time_position = end_debug
+
+    total_duration_ms = video_duration * 1000
+    if current_time_position < total_duration_ms:
+        silence_at_end = total_duration_ms - current_time_position
         combined_audio += AudioSegment.silent(duration=silence_at_end)
 
     final_audio_path = os.path.join(segments_dir, "audio.wav")
     combined_audio.export(final_audio_path, format="wav")
     print(f"[INFO] Fișier audio final generat: {final_audio_path}")
-    
+
     return final_audio_path
+
+
 
 def overlay_audio_with_reduced_original(original_video_path, generated_audio_path, final_video_path, original_volume_reduction=-14):
     """
