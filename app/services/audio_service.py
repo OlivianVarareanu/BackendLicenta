@@ -93,7 +93,7 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
             available_duration = (video_duration - segment["start"]) * 1000
 
         segment_audio_path = os.path.join(segments_dir, f"segment_{segment['index']}_base.mp3")
-        await generate_audio_segment(segment["text"], segment_audio_path, "de-DE-SeraphinaMultilingualNeural", rate="+0%") #ro-RO-EmilNeural , ro-RO-AlinaNeural, en-US-RogerNeural , de-DE-SeraphinaMultilingualNeural
+        await generate_audio_segment(segment["text"], segment_audio_path, "en-US-RogerNeural", rate="+0%") #ro-RO-EmilNeural , ro-RO-AlinaNeural, en-US-RogerNeural , de-DE-SeraphinaMultilingualNeural
         segment_audio = AudioSegment.from_mp3(segment_audio_path)
         actual_duration = segment_audio.duration_seconds * 1000
 
@@ -105,7 +105,7 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
             print(f"[INFO] Segment {segment['index']} prea lung: {actual_duration:.0f}ms > {available_duration:.0f}ms → {rate}")
 
             segment_audio_path = os.path.join(segments_dir, f"segment_{segment['index']}_adjusted.mp3")
-            await generate_audio_segment(segment["text"], segment_audio_path, "de-DE-SeraphinaMultilingualNeural", rate=rate)
+            await generate_audio_segment(segment["text"], segment_audio_path, "en-US-RogerNeural", rate=rate)
             segment_audio = AudioSegment.from_mp3(segment_audio_path)
         else:
             print(f"[INFO] Segment {segment['index']} OK  {actual_duration:.0f}ms ≤ {available_duration:.0f}ms.")

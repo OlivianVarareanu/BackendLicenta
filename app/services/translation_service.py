@@ -14,6 +14,8 @@ lang_code_map = {
     "fr": "fra_Latn",
     "de": "deu_Latn",
     "es": "spa_Latn",
+    "it": "ita_Latn", 
+    "ru": "rus_Cyrl",
 }
 
 def translate_text(text, target_lang, original_lang):
