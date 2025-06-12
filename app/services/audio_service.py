@@ -37,10 +37,10 @@ def transcribe_audio(audio_path, original_lang, model_size="medium"):
     detected_language = result['language']
     return result["segments"], detected_language
 
-async def generate_audio_segment(text, file_path, voice_name, rate="+0%"):
+async def generate_audio_segment(text, file_path, voice_id, rate="+0%"):
     print(f"[DEBUG] Generare segment audio pentru textul: {text}")
     try:
-        tts = edge_tts.Communicate(text, voice_name, rate=rate)
+        tts = edge_tts.Communicate(text, voice_id, rate=rate)
         await tts.save(file_path)
         print(f"[INFO] Segment generat: {file_path}")
         return file_path
@@ -48,7 +48,7 @@ async def generate_audio_segment(text, file_path, voice_name, rate="+0%"):
         print(f"[ERROR] Eroare la generarea segmentului audio: {e}")
         raise
 
-async def generate_audio_segments(segments, video_path, target_lang, user_name):
+async def generate_audio_segments(segments, video_path, target_lang, user_name, voice_id):
     if not user_name:
         raise ValueError("Numele utilizatorului este obligatoriu.")
 
@@ -93,7 +93,7 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
             available_duration = (video_duration - segment["start"]) * 1000
 
         segment_audio_path = os.path.join(segments_dir, f"segment_{segment['index']}_base.mp3")
-        await generate_audio_segment(segment["text"], segment_audio_path, "en-US-RogerNeural", rate="+0%") #ro-RO-EmilNeural , ro-RO-AlinaNeural, en-US-RogerNeural , de-DE-SeraphinaMultilingualNeural
+        await generate_audio_segment(segment["text"], segment_audio_path, voice_id, rate="+0%")
         segment_audio = AudioSegment.from_mp3(segment_audio_path)
         actual_duration = segment_audio.duration_seconds * 1000
 
@@ -105,7 +105,7 @@ async def generate_audio_segments(segments, video_path, target_lang, user_name):
             print(f"[INFO] Segment {segment['index']} prea lung: {actual_duration:.0f}ms > {available_duration:.0f}ms → {rate}")
 
             segment_audio_path = os.path.join(segments_dir, f"segment_{segment['index']}_adjusted.mp3")
-            await generate_audio_segment(segment["text"], segment_audio_path, "en-US-RogerNeural", rate=rate)
+            await generate_audio_segment(segment["text"], segment_audio_path, voice_id, rate=rate)
             segment_audio = AudioSegment.from_mp3(segment_audio_path)
         else:
             print(f"[INFO] Segment {segment['index']} OK  {actual_duration:.0f}ms ≤ {available_duration:.0f}ms.")

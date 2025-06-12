@@ -52,7 +52,7 @@ def overlay_audio_on_video(video_path, audio_path, output_path):
 def find_video_file(directory):
     directory = Path(directory)
     for file in directory.iterdir():
-        if file.is_file() and file.suffix.lower() in (".mp4", ".mkv"):
+        if file.is_file() and file.suffix.lower() in (".mp4", ".mkv",".mov", ".avi", ".flv"):
             return os.path.normpath(file) 
     return None
 

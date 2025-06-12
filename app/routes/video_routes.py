@@ -41,7 +41,7 @@ async def transcribe_video(upload_id: str, original_lang: str | None = Form(None
     if not os.path.exists(original_dir):
         raise HTTPException(status_code=404, detail="Videoclipul original nu exista.")
     
-    video_files = [f for f in os.listdir(original_dir) if f.endswith((".mp4", ".mkv"))]
+    video_files = [f for f in os.listdir(original_dir) if f.endswith((".mp4", ".mkv",".mov"))]
     if not video_files:
         raise HTTPException(status_code=404, detail="Nu a fost gasit niciun videoclip.")
     
@@ -58,7 +58,7 @@ async def transcribe_video(upload_id: str, original_lang: str | None = Form(None
     with open(transcription_path, "w", encoding="utf-8") as f:
         json.dump(original_segments, f, ensure_ascii=False, indent=4)
     
-    return {"message": "succes", "transcription_path": transcription_path, "detected_language": detected_language}
+    return {"message": "succes.", "transcription_path": transcription_path, "detected_language": detected_language}
 
 
 @router.post("/translate/{upload_id}")
@@ -93,7 +93,7 @@ async def translate_transcription(upload_id: str, target_lang: str = Form(...), 
 
 
 @router.post("/generate/{upload_id}")
-async def generate_video(upload_id: str, target_lang: str = Form(...)):
+async def generate_video(upload_id: str, target_lang: str = Form(...), voice_id: str = Form(...)):
     user_dir = Path(f"user_files/{upload_id}")
     original_dir = user_dir / "original"
     translated_transcription_path = user_dir / "transcriptions" / "translated_transcription.json"
@@ -115,7 +115,7 @@ async def generate_video(upload_id: str, target_lang: str = Form(...)):
     with open(translated_transcription_path, "r", encoding="utf-8") as f:
         translated_segments = json.load(f)
 
-    await generate_audio_segments(translated_segments, video_path, target_lang, upload_id)
+    await generate_audio_segments(translated_segments, video_path, target_lang, upload_id, voice_id)
 
     try:
         overlay_audio_with_reduced_original(
